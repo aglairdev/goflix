@@ -1,4 +1,4 @@
-module flix
+module github.com/aglairdev/goflix
 
 go 1.21
 
