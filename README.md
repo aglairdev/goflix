@@ -12,7 +12,7 @@ Requer: `go` `mpv` `ffprobe` (opcional)
 
 **Versão específica:**
 ```bash
-go install github.com/aglairdev/goflix@v1.0
+go install github.com/aglairdev/goflix@v1.0.0
 ```
 Requer: `go` `mpv` `ffprobe` (opcional)
 
