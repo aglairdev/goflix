@@ -345,6 +345,7 @@ const (
 	screenFiles
 	screenInput
 	screenLoading
+	screenUpdate
 )
 
 var footerKey = map[screen]string{
@@ -356,27 +357,26 @@ var footerKey = map[screen]string{
 // Model
 
 type model struct {
-	screen          screen
-	width, height   int
-	mainList        list.Model
-	fileList        list.Model
-	input           textinput.Model
-	dirs            []string
-	curDir          string
-	watched         map[string]int64
-	flash           string
-	flashErr        bool
-	quitting        bool
-	pendingDir      string
-	latestVer       string
-	updateDismissed bool
+	screen        screen
+	width, height int
+	mainList      list.Model
+	fileList      list.Model
+	input         textinput.Model
+	dirs          []string
+	curDir        string
+	watched       map[string]int64
+	flash         string
+	flashErr      bool
+	quitting      bool
+	pendingDir    string
+	latestVer     string
 }
 
 func initialModel() model {
 	ensureConfig()
 	inp := textinput.New()
 	inp.CharLimit, inp.Width = 512, 60
-	m := model{screen: screenMain, input: inp, watched: loadWatched()}
+	m := model{screen: screenLoading, input: inp, watched: loadWatched()}
 	m.reloadDirs()
 	return m
 }
@@ -535,6 +535,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case updateCheckMsg:
 		m.latestVer = msg.latest
+		if msg.latest != "" {
+			m.screen = screenUpdate
+		} else {
+			m.screen = screenMain
+		}
 		return m, nil
 
 	case loadDirMsg:
@@ -553,13 +558,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.screen == screenLoading {
 			return m, nil
 		}
-		// Banner de atualização captura input quando visível
-		if m.latestVer != "" && !m.updateDismissed && m.screen == screenMain {
+		if m.screen == screenUpdate {
 			if msg.String() == "u" {
-				m.flash = t("update_updating")
 				return m, doUpdate()
 			}
-			m.updateDismissed = true
+			m.screen = screenMain
 			return m, nil
 		}
 		switch m.screen {
@@ -739,16 +742,10 @@ func (m model) View() string {
 			"  " + m.input.View() + "\n\n"
 	case screenLoading:
 		body = "  " + styleLoading.Render("⟳  "+t("loading")+" "+filepath.Base(m.pendingDir)+"/") + "\n"
-	}
-
-	// Banner de atualização - só no home, até o usuário interagir
-	updateBanner := ""
-	if m.latestVer != "" && !m.updateDismissed && m.screen == screenMain {
-		updateBanner = "\n" +
-			fmt.Sprintf("  ꕤ %s: %s  (%s: %s)\n",
-				t("update_available"), styleUpdate.Render(m.latestVer),
-				t("update_current"), styleError.Render(Version)) +
-			styleDivider.Render("  ─────────────────────────────────────────────") + "\n" +
+	case screenUpdate:
+		body = "\n  " + fmt.Sprintf("ꕤ %s: %s  (%s: %s)\n\n",
+			t("update_available"), styleUpdate.Render(m.latestVer),
+			t("update_current"), styleError.Render(Version)) +
 			"  " + styleVersion.Render(t("update_prompt")) + "\n"
 	}
 
@@ -770,7 +767,7 @@ func (m model) View() string {
 
 	return header + "\n" +
 		styleDivider.Render(strings.Repeat("─", m.width)) + "\n" +
-		body + updateBanner + footer +
+		body + footer +
 		styleDivider.Render(strings.Repeat("─", m.width)) + "\n" +
 		flash + "\n"
 }
