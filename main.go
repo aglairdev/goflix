@@ -346,12 +346,14 @@ const (
 	screenInput
 	screenLoading
 	screenUpdate
+	screenRename
 )
 
 var footerKey = map[screen]string{
-	screenMain:  "footer_main",
-	screenFiles: "footer_files",
-	screenInput: "footer_input",
+	screenMain:   "footer_main",
+	screenFiles:  "footer_files",
+	screenInput:  "footer_input",
+	screenRename: "footer_rename",
 }
 
 // Model
@@ -370,6 +372,7 @@ type model struct {
 	quitting      bool
 	pendingDir    string
 	latestVer     string
+	renameTarget  string
 }
 
 func initialModel() model {
@@ -568,6 +571,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.screen {
 		case screenInput:
 			return m.updateInput(msg)
+		case screenRename:
+			return m.updateRename(msg)
 		case screenFiles:
 			return m.updateFiles(msg)
 		default:
@@ -625,7 +630,6 @@ func (m model) updateFiles(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.quitting = true
 		return m, tea.Quit
 	case "esc":
-		// Se curDir é raiz → volta ao menu; senão sobe um nível
 		for _, d := range m.dirs {
 			if m.curDir == d {
 				m.curDir, m.screen = "", screenMain
@@ -650,6 +654,21 @@ func (m model) updateFiles(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			delete(m.watched, vi.file.path)
 			m.flash = t("unmarked_watched") + ": " + strings.TrimSuffix(vi.file.name, filepath.Ext(vi.file.name))
 			m.loadDir(m.curDir)
+		}
+		return m, nil
+	case "a":
+		var target string
+		if di, ok := m.fileList.SelectedItem().(dirItem); ok {
+			target = di.path
+		} else if vi, ok := m.fileList.SelectedItem().(videoItem); ok && vi.section != "sep" {
+			target = vi.file.path
+		}
+		if target != "" {
+			m.renameTarget = target
+			m.screen = screenRename
+			m.input.SetValue(filepath.Base(target))
+			m.input.Focus()
+			return m, textinput.Blink
 		}
 		return m, nil
 	case "enter":
@@ -692,11 +711,38 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m model) updateRename(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.screen = screenFiles
+		return m, nil
+	case "enter":
+		newName := strings.TrimSpace(m.input.Value())
+		if newName == "" || newName == filepath.Base(m.renameTarget) {
+			m.screen = screenFiles
+			return m, nil
+		}
+		newPath := filepath.Join(filepath.Dir(m.renameTarget), newName)
+		var fmsg flashMsg
+		if err := os.Rename(m.renameTarget, newPath); err != nil {
+			fmsg = flashMsg{text: err.Error(), err: true}
+		} else {
+			fmsg = flashMsg{text: t("renamed") + ": " + newName, err: false}
+		}
+		m.renameTarget = ""
+		m.screen = screenFiles
+		m.loadDir(m.curDir)
+		return m, func() tea.Msg { return fmsg }
+	}
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	return m, cmd
+}
+
 func (m model) playFile(path string) tea.Cmd {
 	dur, startedAt := getDuration(path), time.Now()
 	return tea.ExecProcess(exec.Command("mpv", "--save-position-on-quit", path), func(err error) tea.Msg {
 		pos := getResumePosition(path)
-		// Marca como assistido ao atingir 90% via posição salva ou tempo decorrido
 		if dur > 0 && ((pos > 0 && pos/dur >= 0.90) || time.Since(startedAt).Seconds() >= dur*0.90) {
 			setWatched(path, true)
 		}
@@ -739,6 +785,9 @@ func (m model) View() string {
 		}
 	case screenInput:
 		body = "  " + styleNormal.Render(t("prompt_dir")) + "\n\n" +
+			"  " + m.input.View() + "\n\n"
+	case screenRename:
+		body = "  " + styleNormal.Render(t("rename_label")+": "+filepath.Base(m.renameTarget)) + "\n\n" +
 			"  " + m.input.View() + "\n\n"
 	case screenLoading:
 		body = "  " + styleLoading.Render("⟳  "+t("loading")+" "+filepath.Base(m.pendingDir)+"/") + "\n"
