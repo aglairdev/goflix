@@ -482,6 +482,7 @@ func (m *model) loadDir(dir string) {
 
 // checkUpdate consulta a API do GitHub em background
 func checkUpdate() tea.Msg {
+	time.Sleep(1000 * time.Millisecond)
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(RepoAPI)
 	if err != nil {
