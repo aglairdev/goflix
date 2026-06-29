@@ -1,11 +1,22 @@
-# goflix ꕤ
+<div align="center">
 
-Acervo de vídeos no terminal.
+[![GOFLIX](https://img.shields.io/badge/GOFLIX-C55A10?style=for-the-badge)](https://github.com/aglairdev/goflix)
 
-## Demo
+</div>
 
-<img width="1919" height="1079" alt="Demo" src="https://github.com/user-attachments/assets/db0e9c06-28dd-4de8-937f-507a5f1ce825" />
+## Que isso?
 
+Gerenciador de vídeos no terminal.
+
+![Go](https://img.shields.io/badge/Go-333333?style=flat-square&logo=go&logoColor=white)
+
+<div align="center">
+
+| Goflix |
+|:------:|
+| <img src="https://github.com/user-attachments/assets/47f7fb85-d3f4-4d7b-8b25-7f27dc94f5f6" alt="Goflix Demo" width="600"> |
+
+</div>
 
 ## Instalação
 
@@ -19,7 +30,6 @@ Requer: `go` `mpv` `ffprobe` (opcional)
 ```bash
 go install github.com/aglairdev/goflix@v1.0.0
 ```
-Requer: `go` `mpv` `ffprobe` (opcional)
 
 **Via release** (sem Go instalado):
 Baixe o binário em [Releases](https://github.com/aglairdev/goflix/releases), mova para `~/.local/bin` e dê permissão de execução:
@@ -40,6 +50,14 @@ export PATH="$HOME/.local/bin:$PATH"
 goflix
 ```
 
+### Flags
+
+| Flag | Descrição |
+|------|-----------|
+| `-v` | exibe versão |
+| `-d` | modo debug (verbose no stderr) |
+| `-h` | mostra ajuda |
+
 ### Atalhos
 
 **Tela inicial:**
@@ -49,6 +67,7 @@ goflix
 | `enter` | abrir diretório |
 | `n` | adicionar diretório |
 | `d` | remover diretório |
+| `t` | alternar tema |
 | `l` | alternar idioma (pt/es) |
 | `q` | sair |
 
@@ -56,12 +75,12 @@ goflix
 
 | Tecla | Ação |
 |---|---|
-| `enter` | reproduzir vídeo |
+| `enter` | reproduzir vídeo / abrir subpasta |
 | `v` | marcar como visto |
 | `r` | desmarcar visto + resetar progresso |
+| `a` | renomear arquivo/diretório |
 | `esc` | voltar |
 | `q` | sair |
-
 ## Atualização
 
 O app verifica atualizações ao iniciar. Se houver uma versão nova:
@@ -82,23 +101,23 @@ Usuários que instalaram via release receberão o aviso, mas precisarão baixar 
 |---|---|
 | `~/.config/goflix/config` | diretórios mapeados |
 | `~/.config/goflix/watched` | histórico de assistidos |
+| `~/.config/goflix/settings` | preferências (tema) |
 
 ## Personalização
 
-### Cor 
+### Tema
 
-Edite a constante `ColorAccent` no topo de `main.go` (valor hex):
+O app tem 5 temas integrados alternados com `t` na tela inicial:
 
-```go
-ColorAccent = "#FF5FA7" // padrão: rosa
-ColorAccent = "#00BFFF" // azul
-ColorAccent = "#A8FF3E" // verde
-```
+| Tema | Cor |
+|------|-----|
+| catppuccin (padrão) | `#CBA6F7` |
+| cyberpunk | `#00FF9C` |
+| gruvbox | `#FE8019` |
+| nord | `#88C0D0` |
+| netflix | `#E50914` |
 
-Qualquer cor hex de 6 dígitos funciona. Recompile após alterar:
-```bash
-go build -o goflix .
-```
+A escolha é persistida e restaurada ao iniciar.
 
 ### Idioma
 
@@ -106,19 +125,8 @@ O idioma pode ser alternado com `l` diretamente no app, sem reiniciar.
 
 ## Tradução
 
-Edite `i18n.go` e adicione um novo bloco com a chave do idioma:
-```go
-"en": {
-    "no_dirs":  "No directories mapped yet.",
-    "hint_add": "Press  n  to add a directory.",
-    // ... translate all keys using the "ptbr" block as reference
-},
-```
-Adicione também o nome do idioma em `langLabel`:
-```go
-"en": "English",
-```
-Use o bloco `"ptbr"` como referência - todas as chaves precisam estar presentes. Abra um PR com o novo idioma.
+Adicione um novo bloco em `i18n.go` copiando o `ptbr` e traduzindo os valores.
+Registre o nome em `langLabel`. Abra um PR.
 
 ## Build 
 
@@ -134,3 +142,8 @@ go build -o goflix .
 rm ~/go/bin/goflix
 rm -r ~/.config/goflix
 ```
+
+## Licença
+[MIT](https://github.com/aglairdev/Goflix/blob/main/LICENSE)
+
+<p align="center">ꕤ AGL</p>
