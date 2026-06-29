@@ -1,3 +1,9 @@
+#
+# goflix ~ gerenciador de vídeos no terminal
+# © 2026 ~ AGL ~ github.com/aglairdev
+# licença: MIT
+#
+
 package main
 
 import (
@@ -45,13 +51,14 @@ type theme struct {
 
 var themes = []theme{
 	{name: "catppuccin", accent: "#CBA6F7"},
-	{name: "cyberpunk",  accent: "#00FF9C"},
-	{name: "gruvbox",    accent: "#FE8019"},
-	{name: "nord",       accent: "#88C0D0"},
-	{name: "netflix",    accent: "#E50914"},
+	{name: "cyberpunk", accent: "#00FF9C"},
+	{name: "gruvbox", accent: "#FE8019"},
+	{name: "nord", accent: "#88C0D0"},
+	{name: "netflix", accent: "#E50914"},
 }
 
 var currentTheme int
+var currentAccent = defaultAccent
 
 // Estilos
 var (
@@ -78,6 +85,7 @@ func applyTheme(accent string) {
 	styleDivider = styleDivider.Foreground(c)
 	styleFooterKey = styleFooterKey.Foreground(c)
 	styleDir = styleDir.Foreground(c)
+	currentAccent = accent
 }
 
 func renderFooter(raw string) string {
@@ -378,7 +386,7 @@ func newDelegate() compactDelegate {
 	d.SetSpacing(0)
 	d.Styles.SelectedTitle = d.Styles.SelectedTitle.
 		Border(lipgloss.NormalBorder(), false, false, false, true).
-		BorderForeground(lipgloss.Color(defaultAccent)).
+		BorderForeground(lipgloss.Color(currentAccent)).
 		Foreground(lipgloss.Color("#FFFFFF")).
 		Bold(true).
 		Padding(0, 0, 0, 1)
@@ -473,6 +481,8 @@ func (m *model) reloadDirs() {
 		return
 	}
 	m.mainList.SetItems(items)
+	m.mainList.SetDelegate(newDelegate())
+
 }
 
 func (m *model) loadDir(dir string) {
@@ -775,6 +785,7 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		m.screen = screenMain
+		m.input.SetValue("")
 		return m, nil
 	case "enter":
 		path := strings.TrimSpace(m.input.Value())
@@ -789,6 +800,7 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.screen = screenMain
 			m.reloadDirs()
 		}
+		m.input.SetValue("")
 		return m, nil
 	}
 	var cmd tea.Cmd
@@ -870,9 +882,18 @@ func (m model) View() string {
 	case screenInput:
 		body = "  " + styleNormal.Render(t("prompt_dir")) + "\n\n" +
 			"  " + m.input.View() + "\n\n"
+		used := strings.Count(body, "\n") + 2
+		if rem := m.height - used - 3; rem > 0 {
+			body += strings.Repeat("\n", rem)
+		}
 	case screenRename:
 		body = "\n  " + styleNormal.Render(t("rename_label")+": "+filepath.Base(m.renameTarget)) + "\n\n" +
 			"  " + m.input.View() + "\n\n"
+		used := strings.Count(body, "\n") + 2
+		if rem := m.height - used - 3; rem > 0 {
+			body += strings.Repeat("\n", rem)
+		}
+
 	case screenLoading:
 		body = "  " + styleLoading.Render("⟳  "+t("loading")) + "\n"
 	case screenUpdate:
