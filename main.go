@@ -25,9 +25,6 @@ const (
 	AppName = "goflix"
 	Version = "v1.1.0"
 	RepoAPI = "https://api.github.com/repos/aglairdev/goflix/releases/latest"
-
-	// Altere para qualquer cor hex válida hexadecimal
-	ColorAccent = "#FF5FA7"
 )
 
 // Extensões de vídeo suportadas
@@ -39,15 +36,32 @@ var videoExts = map[string]bool{
 
 var debugMode bool
 
+const defaultAccent = "#CBA6F7"
+
+type theme struct {
+	name   string
+	accent string
+}
+
+var themes = []theme{
+	{name: "catppuccin", accent: "#CBA6F7"},
+	{name: "cyberpunk",  accent: "#00FF9C"},
+	{name: "gruvbox",    accent: "#FE8019"},
+	{name: "nord",       accent: "#88C0D0"},
+	{name: "netflix",    accent: "#E50914"},
+}
+
+var currentTheme int
+
 // Estilos
 var (
-	styleTitle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ColorAccent))
+	styleTitle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(defaultAccent))
 	styleVersion    = lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA"))
-	styleDivider    = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAccent))
-	styleFooterKey  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ColorAccent))
+	styleDivider    = lipgloss.NewStyle().Foreground(lipgloss.Color(defaultAccent))
+	styleFooterKey  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(defaultAccent))
 	styleFooterDesc = lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA"))
 	styleFooterSep  = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
-	styleDir        = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAccent))
+	styleDir        = lipgloss.NewStyle().Foreground(lipgloss.Color(defaultAccent))
 	styleProgress   = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFCC00"))
 	styleWatched    = lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("#5FAF5F"))
 	styleNormal     = lipgloss.NewStyle().Foreground(lipgloss.Color("#DDDDDD"))
@@ -57,6 +71,14 @@ var (
 	styleLoading    = lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("#FFCC00"))
 	styleUpdate     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#5FAF5F"))
 )
+
+func applyTheme(accent string) {
+	c := lipgloss.Color(accent)
+	styleTitle = styleTitle.Foreground(c)
+	styleDivider = styleDivider.Foreground(c)
+	styleFooterKey = styleFooterKey.Foreground(c)
+	styleDir = styleDir.Foreground(c)
+}
 
 func renderFooter(raw string) string {
 	parts := strings.Split(raw, "  |  ")
@@ -77,9 +99,10 @@ func renderFooter(raw string) string {
 
 // Caminhos calculados uma vez na inicialização
 var (
-	cfgDir      = initCfgDir()
-	cfgFile     = filepath.Join(cfgDir, "config")
-	watchedPath = filepath.Join(cfgDir, "watched")
+	cfgDir       = initCfgDir()
+	cfgFile      = filepath.Join(cfgDir, "config")
+	watchedPath  = filepath.Join(cfgDir, "watched")
+	settingsPath = filepath.Join(cfgDir, "settings")
 )
 
 func initCfgDir() string {
@@ -100,7 +123,7 @@ func mpvWatchDir() string {
 
 func ensureConfig() {
 	os.MkdirAll(cfgDir, 0755)
-	for _, f := range []string{cfgFile, watchedPath} {
+	for _, f := range []string{cfgFile, watchedPath, settingsPath} {
 		if _, err := os.Stat(f); os.IsNotExist(err) {
 			os.WriteFile(f, nil, 0644)
 		}
@@ -152,6 +175,32 @@ func removeDir(path string) {
 		}
 	}
 	saveLines(cfgFile, nd)
+}
+
+func loadTheme() {
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		currentTheme = 0
+		applyTheme(themes[0].accent)
+		return
+	}
+	for _, l := range strings.Split(string(data), "\n") {
+		if parts := strings.SplitN(l, "=", 2); len(parts) == 2 && parts[0] == "theme" {
+			for i, t := range themes {
+				if t.name == parts[1] {
+					currentTheme = i
+					applyTheme(t.accent)
+					return
+				}
+			}
+		}
+	}
+	currentTheme = 0
+	applyTheme(themes[0].accent)
+}
+
+func saveTheme() {
+	os.WriteFile(settingsPath, []byte("theme="+themes[currentTheme].name+"\n"), 0644)
 }
 
 // Assistidos
@@ -329,7 +378,7 @@ func newDelegate() compactDelegate {
 	d.SetSpacing(0)
 	d.Styles.SelectedTitle = d.Styles.SelectedTitle.
 		Border(lipgloss.NormalBorder(), false, false, false, true).
-		BorderForeground(lipgloss.Color(ColorAccent)).
+		BorderForeground(lipgloss.Color(defaultAccent)).
 		Foreground(lipgloss.Color("#FFFFFF")).
 		Bold(true).
 		Padding(0, 0, 0, 1)
@@ -392,6 +441,7 @@ type model struct {
 
 func initialModel() model {
 	ensureConfig()
+	loadTheme()
 	inp := textinput.New()
 	inp.CharLimit, inp.Width = 512, 60
 	m := model{screen: screenLoading, input: inp, watched: loadWatched()}
@@ -619,6 +669,16 @@ func (m model) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.flash = t("lang_changed") + " " + langLabel[currentLang]
 		m.reloadDirs()
 		return m, nil
+	case "t":
+		currentTheme = (currentTheme + 1) % len(themes)
+		applyTheme(themes[currentTheme].accent)
+		saveTheme()
+		m.flash = "Tema: " + themes[currentTheme].name
+		m.reloadDirs()
+		if m.screen == screenFiles && m.curDir != "" {
+			m.loadDir(m.curDir)
+		}
+		return m, nil
 	case "enter":
 		if item, ok := m.mainList.SelectedItem().(dirItem); ok {
 			m.pendingDir = item.path
@@ -640,6 +700,13 @@ func (m model) updateFiles(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "q":
 		m.quitting = true
 		return m, tea.Quit
+	case "t":
+		currentTheme = (currentTheme + 1) % len(themes)
+		applyTheme(themes[currentTheme].accent)
+		saveTheme()
+		m.flash = "Tema: " + themes[currentTheme].name
+		m.loadDir(m.curDir)
+		return m, nil
 	case "esc":
 		for _, d := range m.dirs {
 			if m.curDir == d {
