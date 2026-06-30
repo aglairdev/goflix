@@ -31,14 +31,14 @@ go install github.com/aglairdev/goflix@v1.0.0
 Requer: `go` `mpv` 
 
 **Via release** (sem Go instalado):
-Baixe o binário em [releases](https://github.com/aglairdev/goflix/releases)
+Baixe o binário em [releases](https://github.com/aglairdev/goflix/releases).
 
 Requer: `mpv` 
 
 mova para `~/.local/bin` e dê permissão de execução:
 
 ```bash
-cd go/bin/
+cd ~/go/bin/
 mv goflix ~/.local/bin/
 ```
 Certifique-se de que `~/.local/bin` está no seu PATH. Se não estiver, adicione ao seu `~/.bashrc` ou `~/.zshrc`:
