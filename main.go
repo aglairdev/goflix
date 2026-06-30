@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -29,7 +30,7 @@ import (
 
 const (
 	AppName = "goflix"
-	Version = "v1.1.3"
+	Version = "v1.2.0"
 	RepoAPI = "https://api.github.com/repos/aglairdev/goflix/releases/latest"
 )
 
@@ -41,6 +42,12 @@ var videoExts = map[string]bool{
 }
 
 var debugMode bool
+var logFile *os.File
+
+var (
+	mu           sync.Mutex
+	pendingDebug []string
+)
 
 const defaultAccent = "#CBA6F7"
 
@@ -136,11 +143,13 @@ func ensureConfig() {
 			os.WriteFile(f, nil, 0644)
 		}
 	}
+	debug("config dir: %s", cfgDir)
 }
 
 func loadLines(path string) []string {
 	data, err := os.ReadFile(path)
 	if err != nil {
+		debugErr("falha ao ler %s: %v", path, err)
 		return nil
 	}
 	var lines []string
@@ -153,7 +162,11 @@ func loadLines(path string) []string {
 }
 
 func saveLines(path string, lines []string) error {
-	return os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0644)
+	err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0644)
+	if err != nil {
+		debugErr("falha ao salvar %s: %v", path, err)
+	}
+	return err
 }
 
 func addDir(path string) error {
@@ -183,11 +196,13 @@ func removeDir(path string) {
 		}
 	}
 	saveLines(cfgFile, nd)
+	debug("diretório removido: %s", path)
 }
 
 func loadTheme() {
 	data, err := os.ReadFile(settingsPath)
 	if err != nil {
+		debugErr("settings não encontrado, usando padrão: %v", err)
 		currentTheme = 0
 		applyTheme(themes[0].accent)
 		return
@@ -203,12 +218,14 @@ func loadTheme() {
 			}
 		}
 	}
+	debug("settings corrompido, usando tema padrão")
 	currentTheme = 0
 	applyTheme(themes[0].accent)
 }
 
 func saveTheme() {
 	os.WriteFile(settingsPath, []byte("theme="+themes[currentTheme].name+"\n"), 0644)
+	debug("tema salvo: %s", themes[currentTheme].name)
 }
 
 // Assistidos
@@ -219,6 +236,8 @@ func loadWatched() map[string]int64 {
 		if parts := strings.SplitN(l, "=", 2); len(parts) == 2 {
 			ts, _ := strconv.ParseInt(parts[1], 10, 64)
 			w[parts[0]] = ts
+		} else {
+			debugErr("linha ignorada (formato inválido): %s", l)
 		}
 	}
 	return w
@@ -275,6 +294,7 @@ func getDuration(path string) float64 {
 		"-of", "default=noprint_wrappers=1:nokey=1",
 		path).Output()
 	if err != nil {
+		debugErr("ffprobe falhou para %s: %v", path, err)
 		return 0
 	}
 	v, _ := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
@@ -306,6 +326,7 @@ type videoFile struct {
 func loadVideos(dir string, watched map[string]int64) []videoFile {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
+		debugErr("falha ao ler diretório %s: %v", dir, err)
 		return nil
 	}
 	var files []videoFile
@@ -441,6 +462,8 @@ type model struct {
 	watched       map[string]int64
 	flash         string
 	flashErr      bool
+	debugFlash    string
+	logDirEntry   bool
 	quitting      bool
 	pendingDir    string
 	latestVer     string
@@ -454,6 +477,9 @@ func initialModel() model {
 	inp.CharLimit, inp.Width = 512, 60
 	m := model{screen: screenLoading, input: inp, watched: loadWatched()}
 	m.reloadDirs()
+		if debugMode {
+		m.debugFlash = "[goflix-debug] modo debug ativo"
+	}
 	return m
 }
 
@@ -546,6 +572,10 @@ func (m *model) loadDir(dir string) {
 	l := newList(m.width, h)
 	l.SetItems(items)
 	m.fileList = l
+	if m.logDirEntry {
+		debug("%d vídeos em %s", len(videos), dir)
+		m.logDirEntry = false
+	}
 }
 
 // Verificação de atualização
@@ -556,6 +586,7 @@ func checkUpdate() tea.Msg {
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(RepoAPI)
 	if err != nil {
+		debugErr("update check HTTP falhou: %v", err)
 		return updateCheckMsg{}
 	}
 	defer resp.Body.Close()
@@ -563,11 +594,14 @@ func checkUpdate() tea.Msg {
 		TagName string `json:"tag_name"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		debugErr("update check JSON inválido: %v", err)
 		return updateCheckMsg{}
 	}
 	if payload.TagName != "" && payload.TagName != Version {
+		debug("update disponível: %s (atual: %s)", payload.TagName, Version)
 		return updateCheckMsg{latest: payload.TagName}
 	}
+	debug("update check: %s já é o mais recente", Version)
 	return updateCheckMsg{}
 }
 
@@ -577,6 +611,7 @@ func doUpdate() tea.Cmd {
 		cmd := exec.Command("go", "install", "github.com/aglairdev/goflix@latest")
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 		if err := cmd.Run(); err != nil {
+			debugErr("go install falhou: %v", err)
 			return flashMsg{text: t("update_error"), err: true}
 		}
 		bin, _ := os.Executable()
@@ -588,7 +623,14 @@ func doUpdate() tea.Cmd {
 func (m model) Init() tea.Cmd { return checkUpdate }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	m.flash = ""
+	if m.screen != screenLoading {
+		mu.Lock()
+		if len(pendingDebug) > 0 {
+			m.debugFlash = strings.Join(pendingDebug, "\n")
+			pendingDebug = nil
+		}
+		mu.Unlock()
+	}
 
 	switch msg := msg.(type) {
 
@@ -612,6 +654,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case loadDirMsg:
+		m.logDirEntry = true
 		m.loadDir(msg.dir)
 		m.pendingDir = ""
 		m.screen = screenFiles
@@ -625,6 +668,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		m.flash = ""
+		m.debugFlash = ""
 		if m.screen == screenLoading {
 			return m, nil
 		}
@@ -822,8 +867,16 @@ func (m model) updateRename(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		newPath := filepath.Join(filepath.Dir(m.renameTarget), newName)
 		var fmsg flashMsg
 		if err := os.Rename(m.renameTarget, newPath); err != nil {
+			debugErr("rename falhou: %v", err)
 			fmsg = flashMsg{text: err.Error(), err: true}
 		} else {
+			oldHL := filepath.Join(mpvWatchDir(), mpvHash(m.renameTarget))
+			if _, err := os.Stat(oldHL); err == nil {
+				debugErr(`histórico perdido: "%s" (watch_later existia)`, filepath.Base(m.renameTarget))
+				os.Remove(oldHL)
+			} else {
+				debug("arquivo renomeado: %s → %s", filepath.Base(m.renameTarget), newName)
+			}
 			fmsg = flashMsg{text: t("renamed") + ": " + newName, err: false}
 		}
 		m.renameTarget = ""
@@ -839,6 +892,9 @@ func (m model) updateRename(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m model) playFile(path string) tea.Cmd {
 	dur, startedAt := getDuration(path), time.Now()
 	return tea.ExecProcess(exec.Command("mpv", "--save-position-on-quit", path), func(err error) tea.Msg {
+		if err != nil {
+			debugErr("mpv retornou erro para %s: %v", path, err)
+		}
 		pos := getResumePosition(path)
 		if dur > 0 && ((pos > 0 && pos/dur >= 0.90) || time.Since(startedAt).Seconds() >= dur*0.90) {
 			setWatched(path, true)
@@ -918,12 +974,17 @@ func (m model) View() string {
 		}
 		flash = "  " + style.Render(prefix+m.flash) + "\n"
 	}
-
+	
+	debugSection := ""
+	if m.debugFlash != "" {
+		debugSection = "  " + m.debugFlash + "\n"
+	}
+	
 	s := header + "\n" +
 		styleDivider.Render(strings.Repeat("─", m.width)) + "\n" +
 		body + footer +
 		styleDivider.Render(strings.Repeat("─", m.width)) + "\n" +
-		flash + "\n"
+		flash + debugSection
 	lines := strings.Count(s, "\n")
 	if rem := m.height - lines; rem > 0 {
 		s += strings.Repeat("\n", rem)
@@ -934,8 +995,30 @@ func (m model) View() string {
 // Debug -d
 
 func debug(format string, args ...interface{}) {
-	if debugMode {
-		fmt.Fprintf(os.Stderr, "[goflix-debug] "+format+"\n", args...)
+	if !debugMode {
+		return
+	}
+	msg := fmt.Sprintf("[goflix-debug] "+format, args...)
+	fmt.Fprintln(os.Stderr, msg)
+	mu.Lock()
+	pendingDebug = append(pendingDebug, msg)
+	mu.Unlock()
+	if logFile != nil {
+		fmt.Fprintln(logFile, msg)
+	}
+}
+
+func debugErr(format string, args ...interface{}) {
+	if !debugMode {
+		return
+	}
+	msg := fmt.Sprintf("[goflix-debug] "+format, args...)
+	fmt.Fprintln(os.Stderr, msg)
+	mu.Lock()
+	pendingDebug = append(pendingDebug, msg)
+	mu.Unlock()
+	if logFile != nil {
+		fmt.Fprintln(logFile, msg)
 	}
 }
 
@@ -967,23 +1050,44 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Usage: %s [flags]\n", os.Args[0])
 			fmt.Fprintf(os.Stderr, "\nFlags:\n")
 			fmt.Fprintf(os.Stderr, "  -v\tshow version\n")
-			fmt.Fprintf(os.Stderr, "  -d\tdebug mode (verbose stderr)\n")
+			fmt.Fprintf(os.Stderr, "  -d\tmodo debug (verbose stderr)\n")
 			fmt.Fprintf(os.Stderr, "  -h\tshow this help\n")
 			os.Exit(0)
 		default:
 			fmt.Fprintf(os.Stderr, "unknown flag: %s\n\n", arg)
 			fmt.Fprintf(os.Stderr, "Usage: %s [flags]\n", os.Args[0])
 			fmt.Fprintf(os.Stderr, "  -v\tshow version\n")
-			fmt.Fprintf(os.Stderr, "  -d\tdebug mode\n")
+			fmt.Fprintf(os.Stderr, "  -d\tmodo debug\n")
 			fmt.Fprintf(os.Stderr, "  -h\tshow this help\n")
 			os.Exit(1)
 		}
 	}
 
 	checkDeps()
+
+	if debugMode {
+		var err error
+		logPath := filepath.Join(cfgDir, "debug.log")
+		logFile, err = os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			logFile = nil
+		}
+		now := time.Now().Format("2006-01-02 15:04:05")
+		fmt.Fprintf(logFile, "--\n%s (início)\n", now)
+		debug("modo debug iniciado ~ log: %s", logPath)
+	}
+
 	p := tea.NewProgram(initialModel(), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
+		if logFile != nil {
+			logFile.Close()
+		}
 		fmt.Fprintln(os.Stderr, "erro:", err)
 		os.Exit(1)
+	}
+	if logFile != nil {
+		now := time.Now().Format("2006-01-02 15:04:05")
+		fmt.Fprintf(logFile, "%s (fim)\n--\n", now)
+		logFile.Close()
 	}
 }
