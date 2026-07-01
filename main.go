@@ -30,7 +30,7 @@ import (
 
 const (
 	AppName = "goflix"
-	Version = "v1.1.4"
+	Version = "v1.1.5"
 	RepoAPI = "https://api.github.com/repos/aglairdev/goflix/releases/latest"
 )
 
@@ -615,6 +615,10 @@ func doUpdate() tea.Cmd {
 			return flashMsg{text: t("update_error"), err: true}
 		}
 		bin, _ := os.Executable()
+		if newBin, err := exec.LookPath("goflix"); err == nil && newBin != bin {
+			os.Remove(bin)
+			os.Rename(newBin, bin)
+		}
 		exec.Command(bin, os.Args[1:]...).Start()
 		return tea.QuitMsg{}
 	}
